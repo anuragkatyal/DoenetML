@@ -178,15 +178,18 @@ describe("core's reply arriving before the renderer update for the same action",
         markPendingValuesAnswered(updatesToIgnore, "key1");
         markPendingValuesAnswered(updatesToIgnore, "key2");
 
-        // The reader types another key before the updates arrive.
-        eagerlyShow("key3", "908", COMPONENT_IDX);
-
         // Taking either of these would put "9" or "90" back in the box, and the
         // update for "908" would then be ignored because a newer key is in
-        // flight by the time it arrives.
+        // flight by the time it arrives. The first arrives while no key is
+        // waiting on core's reply, so only the answered values can hold it
+        // back.
         expect(await updateFromCore({ actionId: "key1", value: "9" })).toBe(
             true,
         );
+
+        // The reader types another key before the other updates arrive.
+        eagerlyShow("key3", "908", COMPONENT_IDX);
+
         expect(await updateFromCore({ actionId: "key2", value: "90" })).toBe(
             true,
         );
