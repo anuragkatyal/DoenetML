@@ -3104,6 +3104,9 @@ var saneKeyboardEvents = (function () {
             shouldBeSelected = !!text;
         }
         var shouldBeSelected = false;
+        // The last `input` event since the last keydown (DoenetML: see
+        // `typedText`).
+        var lastInput = null;
         // -*- helper subroutines -*- //
         // Determine whether there's a selection in the textarea.
         // This will always return false in IE < 9, which don't support
@@ -3129,6 +3132,7 @@ var saneKeyboardEvents = (function () {
             if (e.target !== textarea) return;
             keydown = e;
             keypress = null;
+            lastInput = null;
             if (shouldBeSelected)
                 everyTick.listenOnce(function (e) {
                     if (!(e && e.type === "focusout")) {
@@ -3161,6 +3165,35 @@ var saneKeyboardEvents = (function () {
         function onKeyup(e) {
             everyTick.trigger(e);
             if (e.target !== textarea) return;
+            // DoenetML: on Android the on-screen keyboard's backspace is a
+            // keydown and keyup of "Unidentified" (keyCode 229) and nothing
+            // else when there is nothing in the textarea for it to delete,
+            // which is always, since typed text is taken out of it at once.
+            // A key that typed or composed anything raised an `input` event
+            // in between; one that did neither, on an empty textarea, is the
+            // backspace.
+            if (
+                keydown &&
+                keydown.key === "Unidentified" &&
+                !keydown.ctrlKey &&
+                !keydown.altKey &&
+                !keydown.metaKey &&
+                !keypress &&
+                !lastInput &&
+                textarea instanceof HTMLTextAreaElement &&
+                textarea.value === ""
+            ) {
+                keydown = null;
+                if (
+                    controller.options &&
+                    controller.options.overrideKeystroke
+                ) {
+                    controller.options.overrideKeystroke("Backspace", e);
+                } else {
+                    controller.keystroke("Backspace", e);
+                }
+                return;
+            }
             // Handle case of no keypress event being sent
             if (!!keydown && !keypress) {
                 // only check for typed text if this key can type text. Otherwise
@@ -3202,8 +3235,27 @@ var saneKeyboardEvents = (function () {
             // Furthermore, an input event with the value "u" is still processed in Linux and Chrome OS due to the down/up mismatch.
             // The end result is that a spurious "u" is sent followed by the intended character.
             // Due to how this feature works, it's vital to completely ignore Ctrl-Shift-U no matter how the input event appears to Mathquill as clearing the textarea by mistake breaks the expected input flow.
+            // DoenetML: an on-screen keyboard on Android (Gboard and others)
+            // reports every key as a keydown of "Unidentified" (keyCode 229),
+            // then says exactly what it typed in an `input` event of type
+            // `insertText`. Ignoring every "Unidentified" keydown, as the
+            // guard below does, dropped all typing on Android phones. When
+            // the browser has named the one character inserted, outside a
+            // composition, take it: that is not the Ctrl-Shift-U sequence the
+            // guard is for, which composes or carries modifiers.
+            var insertedByOnScreenKeyboard =
+                !!keydown &&
+                keydown.key === "Unidentified" &&
+                !keydown.ctrlKey &&
+                !keydown.altKey &&
+                !keydown.metaKey &&
+                !!lastInput &&
+                lastInput.inputType === "insertText" &&
+                !lastInput.isComposing &&
+                lastInput.data === text;
             if (
                 keydown &&
+                !insertedByOnScreenKeyboard &&
                 (keydown.key === "Unidentified" ||
                     (!keydown.altKey &&
                         keydown.ctrlKey &&
@@ -3235,6 +3287,7 @@ var saneKeyboardEvents = (function () {
         function onBlur() {
             keydown = null;
             keypress = null;
+            lastInput = null;
             everyTick.clearListener();
             if (textarea instanceof HTMLTextAreaElement) textarea.value = "";
         }
@@ -3264,6 +3317,8 @@ var saneKeyboardEvents = (function () {
             });
         }
         function onInput(e) {
+            // Recorded before the tick runs: `typedText` may read it.
+            lastInput = e;
             everyTick.trigger(e);
         }
         if (controller.KIND_OF_MQ === "StaticMath") {
